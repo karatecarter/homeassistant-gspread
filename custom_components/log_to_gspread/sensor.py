@@ -1,3 +1,4 @@
+import asyncio
 from functools import partial
 
 import voluptuous as vol
@@ -5,23 +6,13 @@ import logging
 from aiohttp import ClientError
 import gspread
 #import pandas as pd
+from homeassistant import config_entries, core
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import sys
 from datetime import timedelta
 from typing import Any, Callable, Dict, Optional
-DEPENDENCIES = ('webhook',)
-
-from aiohttp import hdrs
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import (
-    ATTR_NAME,
-    CONF_NAME,
-    CONF_PATH
-)
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.typing import (
@@ -59,19 +50,71 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
+def async_setup_entry(
+    hass: core.HomeAssistant,
+    config_entry: config_entries.ConfigEntry,
+    async_add_entities,
+):
+    """Setup sensors from a config entry created in the integrations UI."""
+    config = hass.data[DOMAIN][config_entry.entry_id]
 
-def setup_platform(
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    api_key_dict = config[CONF_API_KEY]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(api_key_dict, scope)
+
+    sensors = [GspreadSensor(hass, creds, config["sheet_name"])]
+    async_add_entities(sensors, update_before_add=True)
+
+    def log_to_gspread(call):
+        sheet_name = call.data.get("sheet_name")
+        date = call.data.get("date")
+        period = call.data.get("period", "morning")
+        amount = call.data.get("amount", 0)
+
+        if period == "morning":
+            period = "AM"
+            cell = "B"
+        else:
+            period = "PM"
+            cell = "C"
+
+        client = gspread.authorize(creds)
+        sheet = client.open(sheet_name)
+        sheet_instance = sheet.get_worksheet(0)
+
+        records_data = sheet_instance.get_all_records()
+
+        insert_row = True
+
+        i = 1
+        for record in records_data:
+            if insert_row:
+                i = i + 1
+                if record.get("Date") == date:
+                    insert_row = False
+
+        if insert_row:
+            sheet_instance.append_row([date])
+            i = i + 1
+
+        sheet_instance.update(cell + str(i), amount)
+
+    hass.services.register(DOMAIN, "log", log_to_gspread)
+
+
+
+def async_setup_platform(
     hass: HomeAssistantType,
     config: ConfigType,
-    add_entities: Callable,
+    async_add_entities: Callable,
     discovery_info: Optional[DiscoveryInfoType] = None,
 ) -> None:
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     api_key_dict = config[CONF_API_KEY]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(api_key_dict, scope)
 
-    sensors = [GspreadSensor(creds, config["sheet_name"])]
-    add_entities(sensors, update_before_add=True)
+    sensors = [GspreadSensor(hass, creds, config["sheet_name"])]
+    async_add_entities(sensors, update_before_add=True)
 
     def log_to_gspread(call):
         sheet_name = call.data.get("sheet_name")
@@ -113,17 +156,16 @@ def setup_platform(
 class GspreadSensor(Entity):
     """Representation of a Google Sheet sensor."""
 
-    def __init__(self, creds: ServiceAccountCredentials, sheet_name: str):
+    def __init__(self, hass: HomeAssistantType, creds: ServiceAccountCredentials, sheet_name: str):
         super().__init__()
         self._creds = creds
+        self.hass = hass
 
         client = gspread.authorize(self._creds)
-        sheet = client.open(sheet_name)
 
         self._name = sheet_name
         self._state = None
         self._available = True
-        self._sheet_id = sheet.id
 
         self._attrs: Dict[str, Any] = {}
 
@@ -135,6 +177,9 @@ class GspreadSensor(Entity):
     @property
     def unique_id(self) -> str:
         """Return the unique ID of the sensor."""
+        if self._sheet_id is None:
+            _LOGGER.warning("sheet_id is none, returning default id")
+            return "1234567890"
         return self._sheet_id
 
     @property
@@ -150,10 +195,13 @@ class GspreadSensor(Entity):
     def extra_state_attributes(self) -> Dict[str, Any]:
         return self._attrs
 
-    def update(self):
+    async def async_update(self):
         try:
             client = gspread.authorize(self._creds)
-            sheet = client.open(self._name)
+            sheet = await self.hass.async_add_executor_job(client.open(self._name))
+            if self._sheet_id is None:
+                self._sheet_id = sheet.id
+
             sheet_instance = sheet.get_worksheet(0)
             all_records = sheet_instance.get_all_records()
             self._attrs["content"] = all_records

@@ -1,11 +1,11 @@
 {
   "codeowners": ["@karatecarter"],
-  "config_flow": false,
+  "config_flow": true,
   "dependencies": [],
   "documentation": "http://github.com/karatecarter/log_to_gspread",
   "domain": "log_to_gspread",
   "iot_class": "cloud_polling",
   "name": "Log To Google Spreadsheets",
-  "requirements": ["gspread[aiohttp]","google-api-python-client", "oauthclient"],
+  "requirements": ["gspread","google-api-python-client", "oauthclient"],
   "version": "1.0.0"
 }
