@@ -1,0 +1,43 @@
+
+log:
+    name: Log to Google Spreadsheet
+    description: Log to Google Spreadsheet
+    target:
+      entity:
+        integration: log_to_gspread
+        domain: sensor
+    fields:
+       date:
+          name: Date
+          description: Date of log entry
+          required: true
+          example: 12/01/2022
+          selector:
+            text:
+       period:
+          name: Period
+          description: Time of day for log entry
+          required: true
+          example: morning
+          default: morning
+          selector:
+            select:
+               options:
+                  - morning
+                  - afternoon
+       amount:
+          name: Amount
+          description: Amount to log
+          required: true
+          example: 21.99
+          selector:
+             number:
+                min: 0
+                mode: box
+clear:
+    name: Clear Google Spreadsheet
+    description: Clear Google Spreadsheet
+    target:
+      entity:
+        integration: log_to_gspread
+        domain: sensor
