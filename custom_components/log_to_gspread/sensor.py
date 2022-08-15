@@ -56,6 +56,11 @@ async def async_setup_entry(
         {},
         "clear_gspread",
     )
+    platform.async_register_entity_service(
+        "save",
+        {vol.Required("filename"): cv.string},
+        "save_gspread",
+    )
 
 
 class GspreadSensor(Entity):
@@ -122,6 +127,21 @@ class GspreadSensor(Entity):
 
         self.schedule_update_ha_state(True)
 
+    async def save_gspread(self, filename):
+        """Save spreadsheet content as CSV file"""
+        file = open(filename, "w")
+        file.write("Date,AM,PM\n")
+        content: list[dict] = self._attrs["content"]
+        for rec in content:
+            i = 0
+            for e in rec:
+                if i > 0:
+                    file.write(",")
+                i = i + 1
+                file.write(str(rec[e]))
+            file.write("\n")
+        file.close()
+
     @property
     def name(self) -> str:
         """Return the name of the entity."""
@@ -162,7 +182,7 @@ class GspreadSensor(Entity):
             all_records = await self.hass.async_add_executor_job(
                 sheet_instance.get_all_records
             )
-            self._attrs["content"] = all_records
+            self._attrs["content"] = all_records.copy()
             if len(all_records) > 0:
                 last_record = all_records.pop()
                 self._state = last_record["Date"]

@@ -41,3 +41,18 @@ clear:
       entity:
         integration: log_to_gspread
         domain: sensor
+save:
+    name: Save to CSV File
+    description: Save Spreadsheet to CSB file
+    target:
+      entity:
+        integration: log_to_gspread
+        domain: sensor
+    fields:
+       filename:
+          name: filename
+          description: Save filename
+          required: true
+          example: /config/spreadsheet.csv
+          selector:
+            text:
