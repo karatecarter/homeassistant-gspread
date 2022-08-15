@@ -50,7 +50,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-def async_setup_entry(
+async def async_setup_entry(
     hass: core.HomeAssistant,
     config_entry: config_entries.ConfigEntry,
     async_add_entities,
@@ -99,58 +99,7 @@ def async_setup_entry(
 
         sheet_instance.update(cell + str(i), amount)
 
-    hass.services.register(DOMAIN, "log", log_to_gspread)
-
-
-
-def async_setup_platform(
-    hass: HomeAssistantType,
-    config: ConfigType,
-    async_add_entities: Callable,
-    discovery_info: Optional[DiscoveryInfoType] = None,
-) -> None:
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    api_key_dict = config[CONF_API_KEY]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(api_key_dict, scope)
-
-    sensors = [GspreadSensor(hass, creds, config["sheet_name"])]
-    async_add_entities(sensors, update_before_add=True)
-
-    def log_to_gspread(call):
-        sheet_name = call.data.get("sheet_name")
-        date = call.data.get("date")
-        period = call.data.get("period", "morning")
-        amount = call.data.get("amount", 0)
-
-        if period == "morning":
-            period = "AM"
-            cell = "B"
-        else:
-            period = "PM"
-            cell = "C"
-
-        client = gspread.authorize(creds)
-        sheet = client.open(sheet_name)
-        sheet_instance = sheet.get_worksheet(0)
-
-        records_data = sheet_instance.get_all_records()
-
-        insert_row = True
-
-        i = 1
-        for record in records_data:
-            if insert_row:
-                i = i + 1
-                if record.get("Date") == date:
-                    insert_row = False
-
-        if insert_row:
-            sheet_instance.append_row([date])
-            i = i + 1
-
-        sheet_instance.update(cell + str(i), amount)
-
-    hass.services.register(DOMAIN, "log", log_to_gspread)
+    hass.services.async_register(DOMAIN, "log", log_to_gspread)
 
 
 class GspreadSensor(Entity):
@@ -161,11 +110,10 @@ class GspreadSensor(Entity):
         self._creds = creds
         self.hass = hass
 
-        client = gspread.authorize(self._creds)
-
         self._name = sheet_name
         self._state = None
         self._available = True
+        self._sheet_id = None
 
         self._attrs: Dict[str, Any] = {}
 
@@ -198,12 +146,13 @@ class GspreadSensor(Entity):
     async def async_update(self):
         try:
             client = gspread.authorize(self._creds)
-            sheet = await self.hass.async_add_executor_job(client.open(self._name))
+            sheet = await self.hass.async_add_executor_job(client.open, self._name)
+
             if self._sheet_id is None:
                 self._sheet_id = sheet.id
 
-            sheet_instance = sheet.get_worksheet(0)
-            all_records = sheet_instance.get_all_records()
+            sheet_instance = await self.hass.async_add_executor_job(sheet.get_worksheet, 0)
+            all_records = await self.hass.async_add_executor_job(sheet_instance.get_all_records)
             self._attrs["content"] = all_records
             if len(all_records) > 0:
                 last_record = all_records.pop()
